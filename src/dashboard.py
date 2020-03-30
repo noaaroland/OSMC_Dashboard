@@ -39,10 +39,16 @@ platform_depth_variables = {
     'TROPICAL MOORED BUOYS': ['ztmp', 'zsal'],
 }
 
+# use date = "now-7days", but if updates stop you can still test using a specific date
+location_date = "2020-03-12T23:59:00Z"
+
+# use plot_dates = now-14days
+plot_date = "2020-03-05T23:59:00Z"
+
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 
 df = pd.read_csv(
-    'http://dunkel.pmel.noaa.gov:8336/erddap/tabledap/osmc_gts.csv?platform_code%2Cplatform_type%2Ctime%2Clongitude%2Clatitude&distinct()&orderByMax("platform_code,time")&time>=now-7days',
+    'http://dunkel.pmel.noaa.gov:8336/erddap/tabledap/osmc_gts.csv?platform_code%2Cplatform_type%2Ctime%2Clongitude%2Clatitude&distinct()&orderByMax("platform_code,time")&time>=' + location_date,
     skiprows=[1])
 
 
@@ -58,7 +64,6 @@ def serve_layout():
             html.Div(id='platform_info', className='admin-header-subtext'),
             html.Div(id='loaders', children=[
                 dcc.Loading(id="loading-2", children=[html.Div(id="loading-output-2")], type="default", color="yellow"),
-                dcc.Loading(id="loading-3", children=[html.Div(id="loading-output-3")], type="default", color="yellow"),
             ])
         ], className='grid-container admin-header'),
         html.Div([
@@ -134,8 +139,7 @@ def serve_layout():
                 ], id='ztmp_parent', style={'visibility': 'hidden'}),
         ], style={'display': 'grid', 'grid-template-columns': '25vw 25vw 25vw 25vw', 'grid-template-rows': 'auto'}, id='outer_grid'),
         html.Div(id='load-urls', style={'display':'none'}),
-        html.Div(id='surface-data', style={'display':'none'}),
-        html.Div(id='depth-data', style={'display': 'none'}),
+        html.Div(id='data-div', style={'display':'none'}),
         html.Div(id='selected')
     ])
 
@@ -247,11 +251,11 @@ def data_url(selection):
         if platform_type in platform_surface_variables:
             surf_vars = '%2C'.join(platform_surface_variables[platform_type])
             # TODO figure out != NaN for all variables
-            surf_url = 'http://dunkel.pmel.noaa.gov:8336/erddap/tabledap/osmc_gts.csv?time%2C' + surf_vars + '&platform_code="' + platform_code + '"&orderBy("time")&time>now-14days'
+            surf_url = 'http://dunkel.pmel.noaa.gov:8336/erddap/tabledap/osmc_gts.csv?time%2C' + surf_vars + '&platform_code="' + platform_code + '"&orderBy("time")&time>' + plot_date
         if platform_type in platform_depth_variables:
             # TODO figure out sort order (and != NaN)
             depth_vars = '%2C'.join(platform_depth_variables[platform_type])
-            depth_url = 'http://dunkel.pmel.noaa.gov:8336/erddap/tabledap/osmc_gts.csv?time%2Cobservation_depth%2C' + depth_vars + '&platform_code="' + platform_code + '"&orderBy("time,observation_depth")&time>now-14days'
+            depth_url = 'http://dunkel.pmel.noaa.gov:8336/erddap/tabledap/osmc_gts.csv?time%2Cobservation_depth%2C' + depth_vars + '&platform_code="' + platform_code + '"&orderBy("time,observation_depth")&time>' + plot_date
         data_calls = {
             'surface': surf_url,
             'depth': depth_url
@@ -260,60 +264,6 @@ def data_url(selection):
         return json.dumps(data_calls), title
 
 # Combining the surface and depth calls into one call back and making one JSON with both
-@app.callback([
-    dash.dependencies.Output('surface-data', 'children'),
-    dash.dependencies.Output("loading-output-2", "children"),
-],
-    [dash.dependencies.Input('load-urls', 'children')]
-)
-def read_data(calls_json):
-    if calls_json is None:
-        raise dash.exceptions.PreventUpdate()
-    else :
-        calls_json = json.loads(calls_json)
-    if 'surface' not in calls_json:
-        column_names = ["NO DATA"]
-        edf = pd.DataFrame(columns=column_names)
-        return edf.to_json(date_format='iso', orient='split'), ''
-    else:
-        url = calls_json['surface']
-        if url != 'none':
-            ts = pd.read_csv(url, skiprows=[1])
-            return ts.to_json(date_format='iso', orient='split'), ''
-        else:
-            column_names = ["NO DATA"]
-            edf = pd.DataFrame(columns=column_names)
-            return edf.to_json(date_format='iso', orient='split'), ''
-
-
-@app.callback([
-    dash.dependencies.Output('depth-data', 'children'),
-    dash.dependencies.Output("loading-output-3", "children"),
-],
-    [dash.dependencies.Input('load-urls', 'children')]
-)
-def read_depth(calls_json):
-    if calls_json is None:
-        column_names = ["NO DATA"]
-        edf = pd.DataFrame(columns=column_names)
-        return edf.to_json(date_format='iso', orient='split'), ''
-    else :
-        calls_json = json.loads(calls_json)
-    if 'depth' not in calls_json:
-        column_names = ["NO DATA"]
-        edf = pd.DataFrame(columns=column_names)
-        return edf.to_json(date_format='iso', orient='split'), ''
-    else:
-        url = calls_json['depth']
-        if url != 'none':
-            td = pd.read_csv(url, skiprows=[1])
-            return td.to_json(date_format='iso', orient='split'), ''
-        else:
-            column_names = ["NO DATA"]
-            edf = pd.DataFrame(columns=column_names)
-            return edf.to_json(date_format='iso', orient='split'), ''
-
-
 @app.callback([
     dash.dependencies.Output('atmp', 'figure'),
     dash.dependencies.Output('atmp_parent', 'style'),
@@ -329,95 +279,102 @@ def read_depth(calls_json):
     dash.dependencies.Output('windspd_parent', 'style'),
     dash.dependencies.Output('wvht', 'figure'),
     dash.dependencies.Output('wvht_parent', 'style'),
-],
-    [dash.dependencies.Input('surface-data', 'children')])
-def plots(surface_data):
-    if surface_data is None:
-        return {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none')
-    else:
-        ts = pd.read_json(surface_data, orient='split')
-        if 'NO DATA' in ts:
-            return {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none')
-        else:
-            airt = make_figure(ts, 'Air Temperature', 'atmp')
-            precip = make_figure(ts, 'Precipitation', 'precip')
-            slp = make_figure(ts, 'Sea Level Presure', 'slp')
-            sst = make_figure(ts, 'Sea Surface Temperature', 'sst')
-            winddir = make_figure(ts, 'Wind Direction', 'winddir')
-            windspd = make_figure(ts, 'Wind Speed', 'windspd')
-            wvht = make_figure(ts, 'Wave Height', 'wvht')
-            count = airt['count'] + precip['count'] + slp['count'] + sst['count'] + winddir['count'] + windspd['count'] + wvht['count']
-            double_span = 'span 2'
-            single_span = 'auto'
-            if count < 4:
-                if airt['count'] == 1:
-                    airt['style']['grid-column'] = double_span
-                if precip['count'] == 1:
-                    precip['style']['grid-column'] = double_span
-                if slp['count'] == 1:
-                    slp['style']['grid-column'] = double_span
-                if sst['count'] == 1:
-                    sst['style']['grid-column'] = double_span
-                if winddir['count'] == 1:
-                    winddir['style']['grid-column'] = double_span
-                if windspd['count'] == 1:
-                    windspd['style']['grid-column'] = double_span
-                if wvht['count'] == 1:
-                    wvht['style']['grid-column'] = double_span
-            else:
-                if airt['count'] == 1:
-                    airt['style']['grid-column'] = single_span
-                if precip['count'] == 1:
-                    precip['style']['grid-column'] = single_span
-                if slp['count'] == 1:
-                    slp['style']['grid-column'] = single_span
-                if sst['count'] == 1:
-                    sst['style']['grid-column'] = single_span
-                if winddir['count'] == 1:
-                    winddir['style']['grid-column'] = single_span
-                if windspd['count'] == 1:
-                    windspd['style']['grid-column'] = single_span
-                if wvht['count'] == 1:
-                    wvht['style']['grid-column'] = single_span
-
-            return airt['figure'], airt['style'], precip['figure'], precip['style'], slp['figure'], slp['style'], sst['figure'], sst['style'], winddir['figure'], winddir['style'], windspd['figure'], windspd['style'], wvht['figure'], wvht['style']
-
-
-@app.callback([
     dash.dependencies.Output('ztmp_parent', 'style'),
     dash.dependencies.Output('ztmp', 'figure'),
     dash.dependencies.Output('zsal_parent', 'style'),
     dash.dependencies.Output('zsal', 'figure'),
+    dash.dependencies.Output("loading-output-2", "children"),
 ],
-    [dash.dependencies.Input('depth-data', 'children')])
-def depth_plots(depth_data):
-    if depth_data is None:
-        return dict(visibility='hidden'), {'data': [], 'layout': {}},  dict(visibility='hidden'), {'data': [], 'layout': {}}
+    [dash.dependencies.Input('load-urls', 'children')]
+)
+def read_data(calls_json):
+    # read both surface and depth data
+    # start with surface
+    if calls_json is None:
+        raise dash.exceptions.PreventUpdate()
+    else :
+        calls_json = json.loads(calls_json)
+    if 'surface' not in calls_json:
+        column_names = ["NO DATA"]
+        sdf = pd.DataFrame(columns=column_names)
     else:
-        depth_frame = pd.read_json(depth_data, orient='split')
-        if 'NO DATA' in depth_frame:
-            return dict(visibility='hidden'), {'data': [], 'layout': {}},  dict(visibility='hidden'), {'data': [], 'layout': {}}
+        url = calls_json['surface']
+        if url != 'none':
+            sdf = pd.read_csv(url, skiprows=[1])
         else:
-            # Remove all zsal rows that have no data to make zsal interpolated grid
-            zsal_data = depth_frame.loc[depth_frame['zsal'].notna()]
-            zsal_plot = make_depth_plot(zsal_data, 'zsal')
-            # Remove all rows that have no data to make ztmp plot
-            ztmp_data = depth_frame.loc[depth_frame['ztmp'].notna()]
-            ztmp_plot = make_depth_plot(ztmp_data, 'ztmp')
+            column_names = ["NO DATA"]
+            sdf = pd.DataFrame(columns=column_names)
 
-            # This BS is how you make a tuple of tuples into one flat tuple ((a,b)(c,d)) into (a,b,c,d) in this case
+    if 'depth' not in calls_json:
+        column_names = ["NO DATA"]
+        zdf = pd.DataFrame(columns=column_names)
+    else:
+        url = calls_json['depth']
+        if url != 'none':
+            zdf = pd.read_csv(url, skiprows=[1])
+        else:
+            column_names = ["NO DATA"]
+            zdf = pd.DataFrame(columns=column_names)
+    # make graphs and return them without writing data to the empty dif
+    if 'NO DATA' in sdf:
+        splots = {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none'), {'data': [], 'layout': {}}, dict(display='none')
+    else :
+        airt = make_figure(sdf, 'Air Temperature', 'atmp')
+        precip = make_figure(sdf, 'Precipitation', 'precip')
+        slp = make_figure(sdf, 'Sea Level Presure', 'slp')
+        sst = make_figure(sdf, 'Sea Surface Temperature', 'sst')
+        winddir = make_figure(sdf, 'Wind Direction', 'winddir')
+        windspd = make_figure(sdf, 'Wind Speed', 'windspd')
+        wvht = make_figure(sdf, 'Wave Height', 'wvht')
+        count = airt['count'] + precip['count'] + slp['count'] + sst['count'] + winddir['count'] + windspd['count'] + wvht['count']
+        double_span = 'span 2'
+        single_span = 'auto'
+        if count < 4:
+            if airt['count'] == 1:
+                airt['style']['grid-column'] = double_span
+            if precip['count'] == 1:
+                precip['style']['grid-column'] = double_span
+            if slp['count'] == 1:
+                slp['style']['grid-column'] = double_span
+            if sst['count'] == 1:
+                sst['style']['grid-column'] = double_span
+            if winddir['count'] == 1:
+                winddir['style']['grid-column'] = double_span
+            if windspd['count'] == 1:
+                windspd['style']['grid-column'] = double_span
+            if wvht['count'] == 1:
+                wvht['style']['grid-column'] = double_span
+        else:
+            if airt['count'] == 1:
+                airt['style']['grid-column'] = single_span
+            if precip['count'] == 1:
+                precip['style']['grid-column'] = single_span
+            if slp['count'] == 1:
+                slp['style']['grid-column'] = single_span
+            if sst['count'] == 1:
+                sst['style']['grid-column'] = single_span
+            if winddir['count'] == 1:
+                winddir['style']['grid-column'] = single_span
+            if windspd['count'] == 1:
+                windspd['style']['grid-column'] = single_span
+            if wvht['count'] == 1:
+                wvht['style']['grid-column'] = single_span
+        splots = airt['figure'], airt['style'], precip['figure'], precip['style'], slp['figure'], slp['style'], sst['figure'], sst['style'], winddir['figure'], winddir['style'], windspd['figure'], windspd['style'], wvht['figure'], wvht['style']
 
-
-# return sum ((make_figure(ts, 'Air Temperature', 'atmp'),
-#              make_figure(ts, 'Precipitation', 'precip'),
-#              make_figure(ts, 'Sea Level Presure', 'slp'),
-#              make_figure(ts, 'Sea Surface Temperature', 'sst'),
-#              make_figure(ts, 'Wind Direction', 'winddir'),
-#              make_figure(ts, 'Wind Speed', 'windspd'),
-#              make_figure(ts, 'Wave Height', 'wvht')), ())
-
-            return sum ((ztmp_plot, zsal_plot), ())
-
+    if 'NO DATA' in zdf:
+        zplots = dict(visibility='hidden'), {'data': [], 'layout': {}},  dict(visibility='hidden'), {'data': [], 'layout': {}}
+    else:
+        # Remove all zsal rows that have no data to make zsal interpolated grid
+        zsal_data = zdf.loc[zdf['zsal'].notna()]
+        zsal_plot = make_depth_plot(zsal_data, 'zsal')
+        # Remove all rows that have no data to make ztmp plot
+        ztmp_data = zdf.loc[zdf['ztmp'].notna()]
+        ztmp_plot = make_depth_plot(ztmp_data, 'ztmp')
+        zplots = sum ((ztmp_plot, zsal_plot), ())
+    # Concatenate the tuples, that last bit turns the string '' into a tuple,
+    # Passing an empty string to the loading div to shut off the loading animation
+    all_plots = splots + zplots + ('',)
+    return all_plots
 
 def make_depth_plot(depth_frame, var):
     # make a regularly spaced axis base on the min and max depth for all dives
@@ -442,8 +399,8 @@ def make_depth_plot(depth_frame, var):
     # Interpolate the values of zsal and ztmp onto the regular depth axis
     for t in times:
         dive = df2.xs(t, level='time', axis=1)
-        dive_zsal = np.interp(regular_depths, dive['observation_depth'],dive[var])
-        depth_interp[t] = dive_zsal
+        dive_var = np.interp(regular_depths, dive['observation_depth'],dive[var])
+        depth_interp[t] = dive_var
 
     plot_data = [dict(x=times, y=regular_depths, z=depth_interp.values, type='heatmap', xgap=2)]
     if ( var == 'zsal'):
@@ -453,9 +410,10 @@ def make_depth_plot(depth_frame, var):
     plot_layout = dict(autosize=True,
                        yaxis={'automargin': 'true', 'autorange': 'reversed'},
                        title=title)
-
-    return dict(visibility='visible'), {'data': plot_data, 'layout': plot_layout}
-
+    if depth_interp.isnull().all().all():
+        return dict(visibility='hidden'), {'data': plot_data, 'layout': plot_layout}
+    else:
+        return dict(visibility='visible'), {'data': plot_data, 'layout': plot_layout}
 
 if __name__ == '__main__':
     # app.run_server(debug=True)
