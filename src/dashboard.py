@@ -40,10 +40,12 @@ platform_depth_variables = {
 }
 
 # use date = "now-7days", but if updates stop you can still test using a specific date
-location_date = "2020-03-12T23:59:00Z"
+#  ... for testing l  ocation_date = "2020-03-12T23:59:00Z"
+location_date = "now-7days"
 
 # use plot_dates = now-14days
-plot_date = "2020-03-05T23:59:00Z"
+# ... for testing   plot_date = "2020-03-05T23:59:00Z"
+plot_date = "now-14days"
 
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 
